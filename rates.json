@@ -1,0 +1,144 @@
+{
+  "_README": [
+    "Billing rates for cost estimation. EDIT THIS FILE -- nothing else needs to change.",
+    "",
+    "GitHub Copilot bills in AI credits. 1 AI credit = $0.01 USD.",
+    "The published table quotes USD per 1,000,000 tokens; these entries are that",
+    "figure x100 to express it in credits (e.g. $2.00/1M -> 200 credits/1M).",
+    "",
+    "Column mapping from the published table:",
+    "  Input        -> credits_per_1m_input           (FRESH, uncached input only)",
+    "  Cached Input -> credits_per_1m_cache_read",
+    "  Cache Write  -> credits_per_1m_cache_creation  ('N/A' in the table -> null)",
+    "  Output       -> credits_per_1m_output",
+    "",
+    "fresh = input_tokens - cache_read - cache_creation, so the three input classes",
+    "are billed at their own rates and never double-counted.",
+    "",
+    "TIERS: models priced by context size carry a 'tiers' list, matched against the",
+    "turn's input_tokens. The first tier whose max_input_tokens is >= the turn's",
+    "input wins; max_input_tokens null means 'no upper bound'. A model without",
+    "'tiers' uses its flat top-level fields.",
+    "",
+    "A null field contributes NOTHING and is not treated as zero. A model with no",
+    "usable rate is reported as 'no published rate' in the UI, never as $0.00.",
+    "Populate rates ONLY from the published table -- never from memory or inference."
+  ],
+
+  "credit_usd": 0.01,
+  "currency": "USD",
+  "source": "https://docs.github.com/copilot/reference/copilot-billing/models-and-pricing",
+  "retrieved": "2026-08-06",
+  "note": "Rates transcribed from GitHub's published models-and-pricing table (USD per 1M tokens x100 = credits per 1M).",
+
+  "models": {
+    "grok-4.5": {
+      "display": "Grok 4.5",
+      "tiers": [
+        {
+          "max_input_tokens": 200000,
+          "credits_per_1m_input": 200,
+          "credits_per_1m_cache_read": 50,
+          "credits_per_1m_cache_creation": null,
+          "credits_per_1m_output": 600
+        },
+        {
+          "max_input_tokens": null,
+          "credits_per_1m_input": 400,
+          "credits_per_1m_cache_read": 100,
+          "credits_per_1m_cache_creation": null,
+          "credits_per_1m_output": 1200
+        }
+      ],
+      "published_usd_per_1m": "<=200K: in 2.00 / cached 0.50 / out 6.00 ; >200K: in 4.00 / cached 1.00 / out 12.00",
+      "source": "https://docs.github.com/copilot/reference/copilot-billing/models-and-pricing",
+      "retrieved": "2026-08-06"
+    },
+
+    "claude-sonnet-5": {
+      "display": "Claude Sonnet 5",
+      "credits_per_request": null,
+      "credits_per_1m_input": 200,
+      "credits_per_1m_cache_read": 20,
+      "credits_per_1m_cache_creation": 250,
+      "credits_per_1m_output": 1000,
+      "published_usd_per_1m": "in 2.00 / cached 0.20 / cache write 2.50 / out 10.00",
+      "source": "https://docs.github.com/copilot/reference/copilot-billing/models-and-pricing",
+      "retrieved": "2026-08-06"
+    },
+
+    "gpt-5.6-luna": {
+      "display": "GPT-5.6 Luna",
+      "tiers": [
+        {
+          "max_input_tokens": 200000,
+          "credits_per_1m_input": 20,
+          "credits_per_1m_cache_read": 2,
+          "credits_per_1m_cache_creation": 25,
+          "credits_per_1m_output": 120
+        },
+        {
+          "max_input_tokens": null,
+          "credits_per_1m_input": 40,
+          "credits_per_1m_cache_read": 4,
+          "credits_per_1m_cache_creation": 50,
+          "credits_per_1m_output": 180
+        }
+      ],
+      "published_usd_per_1m": "<=200K: 0.20 / 0.02 / 0.25 / 1.20 ; >200K: 0.40 / 0.04 / 0.50 / 1.80",
+      "source": "https://docs.github.com/copilot/reference/copilot-billing/models-and-pricing",
+      "retrieved": "2026-08-06"
+    },
+
+    "gpt-5.3-codex": {
+      "display": "GPT-5.3-Codex",
+      "credits_per_request": null,
+      "credits_per_1m_input": 175,
+      "credits_per_1m_cache_read": 17.5,
+      "credits_per_1m_cache_creation": null,
+      "credits_per_1m_output": 1400,
+      "published_usd_per_1m": "in 1.75 / cached 0.175 / cache write N/A / out 14.00",
+      "source": "https://docs.github.com/copilot/reference/copilot-billing/models-and-pricing",
+      "retrieved": "2026-08-06"
+    },
+
+    "copilot-nes-lysithea-14": {
+      "display": "Next-edit suggestions (NES)",
+      "credits_per_request": 0,
+      "credits_per_1m_input": 0,
+      "credits_per_1m_cache_read": 0,
+      "credits_per_1m_cache_creation": 0,
+      "credits_per_1m_output": 0,
+      "not_billed": true,
+      "published_usd_per_1m": "Not billed: 'Code completions and next edit suggestions are not billed in AI credits. They remain unlimited for all paid Copilot plans.'",
+      "source": "https://docs.github.com/copilot/reference/copilot-billing/models-and-pricing",
+      "retrieved": "2026-08-06"
+    },
+
+    "gpt-4o-mini-2024-07-18": {
+      "display": "GPT-4o mini",
+      "credits_per_request": null,
+      "credits_per_1m_input": null,
+      "credits_per_1m_cache_read": null,
+      "credits_per_1m_cache_creation": null,
+      "credits_per_1m_output": null,
+      "published_usd_per_1m": null,
+      "why_null": "Not present in GitHub's published models-and-pricing table. Used here only for harness-internal calls (title generation, background todo). Left unpriced rather than guessed.",
+      "source": null,
+      "retrieved": null
+    },
+
+    "text-embedding-3-small-512": {
+      "display": "text-embedding-3-small-512",
+      "credits_per_request": null,
+      "credits_per_1m_input": null,
+      "credits_per_1m_cache_read": null,
+      "credits_per_1m_cache_creation": null,
+      "credits_per_1m_output": null,
+      "published_usd_per_1m": null,
+      "why_null": "Embedding models are not listed in the published table. Left unpriced rather than guessed.",
+      "source": null,
+      "retrieved": null
+    }
+  }
+}

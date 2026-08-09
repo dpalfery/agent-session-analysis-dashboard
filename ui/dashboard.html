@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Agent Session Analysis</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<!--
+  Static shell. Contains NO captured telemetry -- all data is fetched from
+  serve.py at runtime, which is why this file is safe to track in git.
+  Requires serve.py; it will not work opened from file://.
+-->
+<div class="wrap">
+  <header>
+    <div>
+      <h1>Agent Session Analysis</h1>
+      <p class="sub" id="meta">loading…</p>
+    </div>
+    <div style="display:flex;gap:10px;align-items:flex-end">
+      <div>
+        <label class="sub" for="pick" style="display:block;margin-bottom:5px">Session</label>
+        <select id="pick"></select>
+      </div>
+      <div>
+        <label class="sub" style="display:block;margin-bottom:5px">&nbsp;</label>
+        <button id="reload" title="Export the latest spans and reconcile">↻ Pull latest</button>
+      </div>
+    </div>
+    <div class="statusbar" id="statusbar">
+      <span class="dot" id="dot"></span><span id="statustext">connecting…</span>
+    </div>
+  </header>
+  <div id="reloadmsg"></div>
+  <div id="app"><div id="boot">Loading sessions…</div></div>
+  <div class="foot" id="foot"></div>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

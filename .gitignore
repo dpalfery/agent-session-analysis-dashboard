@@ -1,0 +1,48 @@
+# ---------------------------------------------------------------------------
+# Captured telemetry and anything derived from it.
+#
+# Spans embed real content from whatever repo the agent was working in --
+# source pulled into tool results, git remotes, infra URLs, filesystem paths,
+# full conversation text. Git history is permanent: committing them once means
+# they survive every later attempt to scrub the working tree. Keep them out.
+# ---------------------------------------------------------------------------
+
+# Raw exports. serve.py's refresh writes here; ingest reads from here.
+.spans/
+
+# Local store. The SCHEMA is version-controlled as code in agentdash/store.py
+# and is recreated on first run, so the database file itself is pure local data
+# and is never committed.
+sessions.db
+sessions.db-wal
+sessions.db-shm
+*.db
+*.db-wal
+*.db-shm
+
+# Legacy artifacts from the pre-agentdash pipeline.
+spans*.json
+session.json
+dashboard.html
+*.export.json
+
+# Local rate overrides (rates.json itself IS tracked).
+rates.local.json
+
+# NOT ignored: ui/ is a static shell that fetches its data from serve.py at
+# runtime and contains no captured telemetry, so it is tracked. Enforced by
+# tests/test_no_data_leak.py -- never inline a payload into ui/.
+
+# python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# os
+.DS_Store
+
+# Deployment-specific leak markers for tests/test_no_data_leak.py. Local only --
+# these are the identifiers the check keeps out of the repo, so they must not
+# themselves be committed.
+tests/markers.local.txt

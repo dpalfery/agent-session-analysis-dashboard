@@ -1,0 +1,87 @@
+{
+ "_note": "Content-free digests of each session payload section. Safe to commit -- contains no captured telemetry, only sha256 prefixes. Guards against silent drift when adapters or views change. The absolute figures in test_parity.py's EXPECTED dict are the externally-verified ones (old pipeline output plus hand-checked token/cost arithmetic).",
+ "generated_from": "agentdash pipeline at parity with the retired analyze.py/render.py",
+ "sessions": {
+  "10b0fabd-fc87-4fa5-bfe8-4d9997a29a60": {
+   "summary": "b8abbdb2743d0911",
+   "turns": "433e1b8ba804a4e8",
+   "tools": "31f2b7accf06ddbb",
+   "servers": "0d27a571ec0705b3",
+   "context": "9e47b173cf1d6540",
+   "reconciliation": "fdaf04257faa7a33",
+   "requests": "83102b39f5571cdd"
+  },
+  "__all__": {
+   "summary": "e84698e31815804e",
+   "turns": "f9f1293956ee469d",
+   "tools": "8e6a383c57e3feaa",
+   "servers": "40c7003660159e1a",
+   "context": "66abd6d04d87d51d",
+   "reconciliation": "bd8a0b5e9b09fac1",
+   "requests": "e446f6a586d9591d"
+  },
+  "45dc72c3-e790-4c54-8584-2b5bf579df4c": {
+   "summary": "372928be5bc9c050",
+   "turns": "b0f0f12976a3f270",
+   "tools": "8ebb3705d76db7ee",
+   "servers": "915dfd57e1657288",
+   "context": "bb8e84c8c0087293",
+   "reconciliation": "0e69e75d6a67d7c2",
+   "requests": "20996385c6795a8f"
+  },
+  "ea8b89d5-1b43-4031-84c8-f54879cd93b2": {
+   "summary": "319b03f777fc32d5",
+   "turns": "e83ed8d4b87f3f4a",
+   "tools": "b85c3225e4e29cea",
+   "servers": "e3a4b591d167d44b",
+   "context": "d25d89804a8767e0",
+   "reconciliation": "74fa0e5ef7b51e1d",
+   "requests": "8200d8742af09d2d"
+  },
+  "9dcd4f3e-4a22-4cad-97d4-66bad61690c2": {
+   "summary": "f4dd5e9dec5c0dc1",
+   "turns": "4f3d7aada358bd15",
+   "tools": "af533a11fa78868e",
+   "servers": "5e394e3e5d79f7b1",
+   "context": "aa8a7d5ce2f0a327",
+   "reconciliation": "69f14e61f22b708c",
+   "requests": "c8ded910d45517a8"
+  },
+  "call-1a629e22-e340-492b-b280-7fb6788bb2e1-3": {
+   "summary": "3d7a384c2dc60223",
+   "turns": "d8779e3422139767",
+   "tools": "d95cb0e5341a71e4",
+   "servers": "2190c0301cdd4bd4",
+   "context": "942b56fd15919be8",
+   "reconciliation": "4c0d44089ccb8cee",
+   "requests": "ab8f08ca0207b8ce"
+  },
+  "call-24129ac5-2fe7-4ba2-9812-725bffffcab9-28": {
+   "summary": "d0c21009c8de160b",
+   "turns": "fafb29d2d5a81da3",
+   "tools": "7961f47fe2a1cc6d",
+   "servers": "c424479ed74157f3",
+   "context": "87f68878dc3f9488",
+   "reconciliation": "b73a06d56b96eddf",
+   "requests": "b7137b002ac22cb4"
+  },
+  "call-cab671aa-ed2e-4f7d-9330-908e4e44ec9f-47": {
+   "summary": "94648fc3f75bcc86",
+   "turns": "38bddadffcbed909",
+   "tools": "bc82132a9b36bb25",
+   "servers": "4c73708bf193b3ff",
+   "context": "b2f93012dfa1c3d8",
+   "reconciliation": "e19359bfcf7d6029",
+   "requests": "5e9020e5afd77ee4"
+  },
+  "cbec6d2c-704c-46b8-9a56-ed8e168d317f": {
+   "summary": "82364bce626656d2",
+   "turns": "a16a5ca039803c95",
+   "tools": "1760466cfb0bc910",
+   "servers": "62be38ab6580c0ed",
+   "context": "9c0438f8591b53ec",
+   "reconciliation": "6cd56b0f07fde32e",
+   "requests": "035a330d18f205a0"
+  }
+ }
+}
