@@ -36,6 +36,14 @@
   <div id="app"><div id="boot">Loading sessions…</div></div>
   <div class="foot" id="foot"></div>
 </div>
+<div id="drw-backdrop" onclick="closeDrawer()"></div>
+<div id="drw" role="dialog" aria-modal="true">
+  <div class="drw-header">
+    <span id="drw-title" class="drw-title"></span>
+    <button class="drw-close" onclick="closeDrawer()" title="Close (Esc)">✕</button>
+  </div>
+  <div id="drw-body" class="drw-body"></div>
+</div>
 <script src="app.js"></script>
 </body>
 </html>

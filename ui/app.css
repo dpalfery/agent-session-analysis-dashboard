@@ -83,3 +83,70 @@ pre{background:#0a0d12;border:1px solid var(--bd);border-radius:6px;padding:12px
 .dot.stale{background:var(--fresh)}
 .dot.down{background:var(--danger)}
 #boot{padding:40px 0;color:var(--mut);font-size:13px}
+
+/* ---- side drawer ---- */
+.bar-grp{cursor:pointer}
+.bar-grp:hover rect{filter:brightness(1.25)}
+rect.clickable{cursor:pointer}
+rect.clickable:hover{filter:brightness(1.25)}
+#drw-backdrop{position:fixed;inset:0;background:rgba(1,4,9,.55);opacity:0;
+  pointer-events:none;transition:opacity .2s;z-index:40}
+#drw-backdrop.open{opacity:1;pointer-events:auto}
+#drw{position:fixed;top:0;right:0;bottom:0;width:min(560px,94vw);z-index:41;
+  background:var(--panel);border-left:1px solid var(--bd);
+  transform:translateX(102%);transition:transform .22s ease;
+  display:flex;flex-direction:column;box-shadow:-12px 0 40px rgba(0,0,0,.45)}
+#drw.open{transform:translateX(0)}
+.drw-header{display:flex;align-items:center;justify-content:space-between;gap:12px;
+  padding:14px 18px;border-bottom:1px solid var(--bd);flex:none}
+.drw-title{font-weight:600;font-size:14px;overflow:hidden;text-overflow:ellipsis;
+  white-space:nowrap;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.drw-close{background:none;border:1px solid var(--bd);color:var(--mut);
+  border-radius:6px;padding:3px 9px;font-size:13px;cursor:pointer;flex:none}
+.drw-close:hover{color:var(--fg);border-color:var(--accent)}
+.drw-body{overflow-y:auto;padding:16px 18px;flex:1;font-size:12.5px}
+.dr-sec{margin-bottom:18px}
+.dr-shead{font-size:11px;text-transform:uppercase;letter-spacing:.07em;
+  color:var(--mut);margin-bottom:8px;font-weight:600}
+.dr-minibar{display:flex;height:10px;border-radius:4px;overflow:hidden;
+  margin-bottom:10px;background:var(--panel2)}
+.dr-minibar span{display:block;height:100%}
+.dr-stat{display:flex;align-items:baseline;gap:8px;padding:3px 0;font-size:12.5px}
+.dr-stat .dr-k{color:var(--mut);flex:none;min-width:150px}
+.dr-sv{font-variant-numeric:tabular-nums;font-weight:600}
+.dr-dot{width:9px;height:9px;border-radius:2px;flex:none;align-self:center}
+.dr-dim{color:var(--dim);font-size:11px}
+.dr-note{font-size:11.5px;margin:10px 0}
+.dr-msg{border:1px solid var(--bd);border-radius:8px;padding:10px 12px;margin-bottom:10px}
+.dr-msg.usr{border-left:3px solid var(--accent)}
+.dr-msg.ast{border-left:3px solid var(--out)}
+.dr-msg.sys{border-left:3px solid var(--dim)}
+.dr-role{font-size:10px;text-transform:uppercase;letter-spacing:.08em;
+  color:var(--mut);margin-bottom:5px;font-weight:600}
+.dr-p{margin:0 0 8px;white-space:pre-wrap;word-break:break-word;line-height:1.55}
+.dr-p:last-child{margin-bottom:0}
+.dr-xml,.dr-tool{border:1px solid var(--bd);border-radius:6px;margin:6px 0;
+  background:var(--panel2)}
+.dr-xml summary,.dr-tool summary{cursor:pointer;padding:6px 10px;font-size:11.5px;
+  color:var(--mut);display:flex;gap:7px;align-items:baseline;list-style:none}
+.dr-xml summary::-webkit-details-marker,.dr-tool summary::-webkit-details-marker{display:none}
+.dr-xml summary:hover,.dr-tool summary:hover{color:var(--fg)}
+.dr-xml[open]>summary,.dr-tool[open]>summary{border-bottom:1px solid var(--bd)}
+.dr-xml-tag{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:#d29922;flex:none}
+.dr-xml-prev{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dim)}
+.dr-tc-ico{flex:none}
+.dr-tc-name{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--accent)}
+.dr-tool.res .dr-tc-name{color:var(--out)}
+.dr-tool>*:not(summary),.dr-xml>pre{margin:8px 10px}
+.dr-pre{background:#0a0d12;border:1px solid var(--bd);border-radius:6px;
+  padding:10px;overflow:auto;max-height:340px;font-size:11px;color:#c9d1d9;
+  margin:8px 10px;white-space:pre-wrap;word-break:break-word;
+  font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.dr-kv{display:flex;gap:10px;padding:4px 0;border-bottom:1px solid #21262d;
+  font-size:11.5px;align-items:baseline}
+.dr-kv:last-child{border-bottom:none}
+.dr-kv .dr-k{color:var(--mut);flex:none;min-width:110px;max-width:170px;
+  overflow:hidden;text-overflow:ellipsis;
+  font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.dr-vv{min-width:0;word-break:break-word;flex:1}
+@media(max-width:640px){#drw{width:100vw}}

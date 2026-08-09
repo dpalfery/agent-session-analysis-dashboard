@@ -13,6 +13,9 @@ let D = {rates:{}, tokenizer:{}, harnesses:{}, sources:[]};
 let HMETA = {};      // meta for the harness of the session on screen
 let SESSIONS = [];
 let CUR = null;
+let CUR_SESSION = null;   // full payload of the session on screen
+let SPAN_MAP = {};         // spanId → raw_attributes (from timeline walk)
+let CTXDATA = [];          // context chart click data [{rowIdx,label,key,value,total}]
 
 const fmt  = n => n===null||n===undefined ? null : n.toLocaleString();
 const kt   = n => n===0 ? '0' : (n/1000).toFixed(n>=10000?0:1)+'k';
@@ -34,6 +37,238 @@ function skillCoverage(){
   const pa = HMETA.partial_attributes || {};
   const k = Object.keys(pa).find(x=>x.toLowerCase().includes('skill_name'));
   return k ? pa[k] : null;
+}
+
+/* ---------------- side drawer ---------------- */
+function buildSpanMap(nodes){
+  SPAN_MAP = {};
+  (function walk(ns){ ns.forEach(n=>{ SPAN_MAP[n.spanId]=n; walk(n.children||[]); }); })(nodes||[]);
+}
+function openDrawer(title, html){
+  document.getElementById('drw-title').textContent = title;
+  document.getElementById('drw-body').innerHTML = html;
+  document.getElementById('drw').classList.add('open');
+  document.getElementById('drw-backdrop').classList.add('open');
+  document.getElementById('drw-body').scrollTop = 0;
+}
+function closeDrawer(){
+  document.getElementById('drw').classList.remove('open');
+  document.getElementById('drw-backdrop').classList.remove('open');
+}
+document.addEventListener('keydown', e=>{ if(e.key==='Escape') closeDrawer(); });
+
+// JSON attribute values may be truncated server-side; parse defensively.
+function tryJSON(v){
+  if(v===null||v===undefined) return null;
+  if(typeof v!=='string') return v;
+  try{ return JSON.parse(v); }catch(e){ return null; }
+}
+
+// Harness-injected XML blocks folded into <details>; everything else escaped.
+const XML_FOLD_TAGS = ['environment_info','workspace_info','instructions',
+  'copilot_instructions','context','reminderInstructions','editor_context',
+  'tool_use_instructions','notebook_info','system_reminder','file_contents',
+  'attachment','environment_details'];
+function fmtText(raw){
+  if(!raw) return '';
+  const re = new RegExp('<('+XML_FOLD_TAGS.join('|')+')(\\s[^>]*)?>([\\s\\S]*?)(?:</\\1>|$)','g');
+  let html='', last=0, m;
+  while((m=re.exec(raw))!==null){
+    const before=raw.slice(last,m.index).trim();
+    if(before) html+=`<p class="dr-p">${esc(before)}</p>`;
+    const inner=m[3].trim();
+    const preview=inner.slice(0,90).replace(/\s+/g,' ');
+    html+=`<details class="dr-xml"><summary><span class="dr-xml-tag">&lt;${esc(m[1])}&gt;</span>
+      <span class="dr-xml-prev">${esc(preview)}${inner.length>90?'…':''}</span></summary>
+      <pre class="dr-pre">${esc(inner)}</pre></details>`;
+    last=m.index+m[0].length;
+  }
+  const rest=raw.slice(last).trim();
+  if(rest) html+=`<p class="dr-p">${esc(rest)}</p>`;
+  return html;
+}
+
+// One raw Copilot / canonical message part → readable HTML.
+function fmtPart(p){
+  if(!p || typeof p!=='object') return '';
+  const t=p.type;
+  if(t==='text') return fmtText(p.content!==undefined?p.content:(p.text||''));
+  if(t==='reasoning'){
+    const r=p.content||p.text||(p.raw&&(p.raw.content||p.raw.text))||JSON.stringify(p.raw||p);
+    return `<details class="dr-xml"><summary><span class="dr-xml-tag">reasoning</span></summary>
+      <pre class="dr-pre">${esc(typeof r==='string'?r:JSON.stringify(r,null,2))}</pre></details>`;
+  }
+  if(t==='tool_call'||(p.name&&p.arguments!==undefined)){
+    const src=p.raw||p;
+    let args=src.arguments!==undefined?src.arguments:src.input;
+    const parsed=typeof args==='string'?(tryJSON(args)??args):args;
+    return `<details class="dr-tool"><summary><span class="dr-tc-ico">🔧</span>
+      <span class="dr-tc-name">${esc(src.name||'tool call')}</span></summary>
+      ${kvTable(parsed)}</details>`;
+  }
+  if(t==='tool_result'||t==='tool_call_response'||t==='tool_call_result'){
+    const src=p.raw!==undefined?p.raw:(p.response!==undefined?p.response:p);
+    return `<details class="dr-tool res"><summary><span class="dr-tc-ico">↩</span>
+      <span class="dr-tc-name">tool result</span></summary>${kvTable(src)}</details>`;
+  }
+  return `<details class="dr-xml"><summary><span class="dr-xml-tag">${esc(t||'part')}</span></summary>
+    <pre class="dr-pre">${esc(JSON.stringify(p,null,2))}</pre></details>`;
+}
+
+// Object → readable key/value list; strings render as folded text, not JSON.
+function kvTable(v){
+  if(v===null||v===undefined) return '<p class="dr-p dr-dim">empty</p>';
+  if(typeof v==='string') return fmtText(v)||`<p class="dr-p dr-dim">empty</p>`;
+  if(Array.isArray(v)) return v.map(kvTable).join('');
+  if(typeof v!=='object') return `<p class="dr-p">${esc(String(v))}</p>`;
+  const rows=Object.entries(v).map(([k,val])=>{
+    const body = typeof val==='string'
+      ? (val.length>200?`<details class="dr-xml"><summary><span class="dr-xml-prev">${esc(val.slice(0,90).replace(/\s+/g,' '))}…</span></summary><pre class="dr-pre">${esc(val)}</pre></details>`:esc(val))
+      : `<span class="mono">${esc(JSON.stringify(val))}</span>`;
+    return `<div class="dr-kv"><span class="dr-k">${esc(k)}</span><div class="dr-vv">${body}</div></div>`;
+  });
+  return rows.join('');
+}
+
+function fmtMessages(msgs, opts){
+  const only=(opts||{}).roles;
+  return (msgs||[]).filter(m=>!only||only.includes(m.role)).map(m=>{
+    const cls=m.role==='user'?'usr':m.role==='assistant'?'ast':'sys';
+    const parts=(m.parts||[]).map(fmtPart).join('') ||
+      (typeof m.content==='string'?fmtText(m.content):'');
+    if(!parts) return '';
+    return `<div class="dr-msg ${cls}"><div class="dr-role">${esc(m.role||'?')}</div>${parts}</div>`;
+  }).join('');
+}
+
+function statRow(label, val, extra){
+  return `<div class="dr-stat"><span class="dr-k">${esc(label)}</span>
+    <span class="dr-sv">${val}</span>${extra?`<span class="dr-dim">${extra}</span>`:''}</div>`;
+}
+
+/* -- turn drawer -- */
+function drawerTurn(i){
+  const s=CUR_SESSION; if(!s) return;
+  const t=s.turns[i]; if(!t) return;
+  const segs=[['Cache-read input',t.cache_read,'var(--cache)'],
+              ['Cache-creation input',t.cache_creation,'#4d8fc9'],
+              ['Fresh input',t.fresh,'var(--fresh)'],
+              ['Output',t.visible_output,'var(--out)'],
+              ['Reasoning output',t.reasoning,'var(--reason)']].filter(([,v])=>v);
+  const total=segs.reduce((a,[,v])=>a+v,0)||1;
+  const bar = `<div class="dr-minibar">${segs.map(([l,v,c])=>
+    `<span style="width:${(v/total*100).toFixed(2)}%;background:${c}" title="${l}: ${fmt(v)}"></span>`).join('')}</div>`;
+  const rows=segs.map(([l,v,c])=>
+    `<div class="dr-stat"><i class="dr-dot" style="background:${c}"></i>
+     <span class="dr-k">${l}</span><span class="dr-sv">${fmt(v)}</span>
+     <span class="dr-dim">${(v/total*100).toFixed(1)}%</span></div>`).join('');
+
+  let html=`<div class="dr-sec"><div class="dr-shead">Token spend — ${fmt(total)} total</div>${bar}${rows}
+    ${statRow('Model', esc(t.model||'—'))}
+    ${t.durationMs!==null&&t.durationMs!==undefined?statRow('Duration',dur(t.durationMs)):''}
+    ${t.ttft_ms!==null&&t.ttft_ms!==undefined?statRow('Time to first token',Math.round(t.ttft_ms)+'ms'):''}
+    ${t.credits!==null&&t.credits!==undefined?statRow('Cost',fmtCredits(t.credits)+' credits'+(t.usd!==null&&t.usd!==undefined?' · '+usd(t.usd):'')):''}
+  </div>`;
+  if(t.fresh_jump_pct!==null)
+    html+=`<div class="note bad dr-note">Fresh input jumped <strong>+${t.fresh_jump_pct}%</strong> vs the previous turn — cache miss or new material pulled in.</div>`;
+  if(t.request_start)
+    html+=`<div class="note dr-note">New request starts at this turn: <em>${esc(t.request_start)}</em></div>`;
+
+  const attrs=(SPAN_MAP[t.spanId]||{}).attributes||{};
+  const inMsgs=tryJSON(attrs['gen_ai.input.messages']);
+  const outMsgs=tryJSON(attrs['gen_ai.output.messages']);
+  if(inMsgs){
+    const users=inMsgs.filter(m=>m.role==='user');
+    const lastUser=users.length?[users[users.length-1]]:[];
+    const conv=fmtMessages(lastUser);
+    if(conv) html+=`<div class="dr-sec"><div class="dr-shead">Latest user message</div>${conv}</div>`;
+  }
+  if(outMsgs){
+    const conv=fmtMessages(outMsgs);
+    if(conv) html+=`<div class="dr-sec"><div class="dr-shead">Model response</div>${conv}</div>`;
+  }
+  if(!inMsgs&&!outMsgs){
+    const has=Object.keys(attrs).length;
+    html+= has
+      ? `<div class="dr-sec"><div class="dr-shead">Span attributes</div>${kvTable(attrs)}</div>`
+      : `<div class="note dr-note">No message content was recorded on this span${
+          attrs['gen_ai.input.messages']?' (it was truncated during export)':''}.</div>`;
+  }
+  openDrawer(`Turn ${t.index}`, html);
+}
+
+/* -- context bucket drawer -- */
+function drawerCtx(ci){
+  const d=CTXDATA[ci]; if(!d||!CUR_SESSION) return;
+  let html=`<div class="dr-sec"><div class="dr-shead">${esc(d.label)}</div>
+    ${statRow('Tokens (approx.)',fmt(d.value))}
+    ${statRow('Share of reported input',(d.value/d.total*100).toFixed(1)+'%')}
+    ${statRow('Reported input total',fmt(d.total))}</div>`;
+
+  // Pull the matching content off the chat span that carried input_messages.
+  const ctx=CUR_SESSION.context||{};
+  const src=d.rowIdx===0?ctx.first:ctx.last;
+  const turn=src?CUR_SESSION.turns[(src.turn||1)-1]:null;
+  const attrs=turn?((SPAN_MAP[turn.spanId]||{}).attributes||{}):{};
+  if(d.key==='System prompt'){
+    const sys=attrs['gen_ai.system_instructions'];
+    if(sys) html+=`<div class="dr-sec"><div class="dr-shead">System prompt text</div>${fmtText(sys)}</div>`;
+  }else if(d.key==='built-in tools'||d.key.startsWith('mcp: ')){
+    const defs=tryJSON(attrs['gen_ai.tool.definitions']);
+    if(defs){
+      const mine=defs.filter(td=>{
+        const n=(td.name||(td.function||{}).name||'');
+        const isMcp=n.startsWith('mcp_');
+        return d.key==='built-in tools'?!isMcp:isMcp&&n.startsWith('mcp_'+d.key.slice(5));
+      });
+      if(mine.length) html+=`<div class="dr-sec"><div class="dr-shead">${mine.length} tool definition(s)</div>
+        ${mine.map(td=>{const f=td.function||td;return `<details class="dr-tool"><summary><span class="dr-tc-ico">🔧</span>
+          <span class="dr-tc-name">${esc(td.name||f.name||'?')}</span></summary>
+          ${f.description?`<p class="dr-p">${esc(f.description)}</p>`:''}
+          ${f.parameters?kvTable(f.parameters):''}</details>`;}).join('')}</div>`;
+    }
+  }else if(d.key==='Conversation history'||d.key==='File contents via tool results'){
+    const msgs=tryJSON(attrs['gen_ai.input.messages']);
+    if(msgs){
+      const conv = d.key==='Conversation history'
+        ? fmtMessages(msgs.map(m=>({...m,parts:(m.parts||[]).filter(p=>p.type!=='tool_result'&&p.type!=='tool_call_response')})))
+        : msgs.map(m=>(m.parts||[]).filter(p=>['tool_result','tool_call_response','tool_call_result'].includes(p.type)).map(fmtPart).join('')).join('');
+      if(conv) html+=`<div class="dr-sec"><div class="dr-shead">${esc(d.key)}</div>${conv}</div>`;
+    }
+  }else if(d.key.startsWith('Unattributed')){
+    html+=`<div class="note dr-note">This band is the gap between the sum of measured buckets and the model's own
+      reported <span class="mono">input_tokens</span> — chat framing, role delimiters and tokenizer drift.
+      It cannot be attributed to specific content.</div>`;
+  }
+  openDrawer(d.key, html);
+}
+
+/* -- tool drawer -- */
+function drawerTool(i){
+  const s=CUR_SESSION; if(!s) return;
+  const t=s.tools.filter(x=>x.in_definitions)[i]; if(!t) return;
+  const dead=t.invocations===0;
+  let html=`${dead?'<div class="note bad dr-note"><strong>Never invoked.</strong> Its schema still costs tokens on every turn it is offered.</div>':''}
+    <div class="dr-sec"><div class="dr-shead">Cost</div>
+    ${statRow('Schema tokens',fmt(t.schema_tokens))}
+    ${statRow('Turns resident',t.turns_resident)}
+    ${statRow('Total schema cost',fmt(t.total_schema_cost),'schema × turns')}
+    ${statRow('Invocations',t.invocations)}
+    ${t.cost_per_invocation!==null?statRow('Cost per invocation',fmt(t.cost_per_invocation)):''}
+    ${t.result_tokens!==null&&t.result_tokens!==undefined?statRow('Result tokens',fmt(t.result_tokens)):''}
+    ${statRow('Server',esc(t.server)+(t.is_mcp?' (MCP)':''))}</div>`;
+  // Schema definition off the first chat span that carried tool definitions.
+  const turn=(s.turns||[]).find(x=>x.has_tool_defs);
+  const attrs=turn?((SPAN_MAP[turn.spanId]||{}).attributes||{}):{};
+  const defs=tryJSON(attrs['gen_ai.tool.definitions']);
+  const def=defs&&defs.find(td=>(td.name||(td.function||{}).name)===t.name);
+  if(def){
+    const f=def.function||def;
+    html+=`<div class="dr-sec"><div class="dr-shead">Schema definition</div>
+      ${f.description?`<p class="dr-p">${esc(f.description)}</p>`:''}
+      ${f.parameters?`<div class="dr-shead" style="margin-top:10px">Parameters</div>${kvTable(f.parameters)}`:''}</div>`;
+  }
+  openDrawer(t.name, html);
 }
 
 /* ---------------- cost ---------------- */
@@ -145,16 +380,18 @@ function turnChart(s){
   let bars='', ann='', pts=[];
   T.forEach((t,i)=>{
     const cx=PL+iw*(i+0.5)/T.length, x=cx-bw/2;
-    let acc=0;
+    let acc=0, tg='';
     segs.forEach(([k,,c])=>{
       const v=t[k]||0; if(!v) return;
       const h=ih*v/max, y=PT+ih-h-acc;
-      bars+=`<rect x="${x}" y="${y}" width="${bw}" height="${h}" fill="${c}">
-        <title>Turn ${t.index} — ${k}: ${fmt(v)} tok</title></rect>`;
+      tg+=`<rect x="${x}" y="${y}" width="${bw}" height="${h}" fill="${c}">
+        <title>Turn ${t.index} — ${k}: ${fmt(v)} tok — click for detail</title></rect>`;
       acc+=h;
     });
-    bars+=`<text x="${cx}" y="${PT+ih+15}" text-anchor="middle">${t.index}</text>`;
-    bars+=`<text x="${cx}" y="${PT+ih+28}" text-anchor="middle" style="fill:var(--dim);font-size:9px">${kt(tot(t))}</text>`;
+    tg+=`<rect x="${x}" y="${PT}" width="${bw}" height="${ih}" fill="transparent"/>`;
+    tg+=`<text x="${cx}" y="${PT+ih+15}" text-anchor="middle">${t.index}</text>`;
+    tg+=`<text x="${cx}" y="${PT+ih+28}" text-anchor="middle" style="fill:var(--dim);font-size:9px">${kt(tot(t))}</text>`;
+    bars+=`<g class="bar-grp" onclick="drawerTurn(${i})">${tg}</g>`;
     // a new invoke_agent request starts here -- mark the boundary
     if(t.request_start!==null && i>0){
       const bx=cx-iw/T.length/2;
@@ -232,8 +469,11 @@ function ctxChart(s){
       const v = k.startsWith('Unattributed') ? resid : d.buckets[k];
       if(!v) return;
       const w=iw*v/tot;
-      svg+=`<rect x="${x}" y="${y}" width="${w}" height="30" fill="${col[k]}">
-        <title>${esc(k)}: ${fmt(v)} tok (${(v/tot*100).toFixed(1)}%)</title></rect>`;
+      const ci=CTXDATA.length;
+      CTXDATA.push({rowIdx:ri, label:lab, key:k, value:v, total:tot});
+      svg+=`<rect x="${x}" y="${y}" width="${w}" height="30" fill="${col[k]}" class="clickable"
+        onclick="drawerCtx(${ci})">
+        <title>${esc(k)}: ${fmt(v)} tok (${(v/tot*100).toFixed(1)}%) — click for detail</title></rect>`;
       if(w>44) svg+=`<text x="${x+w/2}" y="${y+19}" text-anchor="middle" style="fill:#0d1117;font-weight:700;font-size:9.5px">${(v/tot*100).toFixed(0)}%</text>`;
       x+=w;
     });
@@ -277,7 +517,7 @@ function toolView(s){
     const y=i*RH, w=(W-PL-PR)*(t.total_schema_cost||0)/max;
     const dead=t.invocations===0;
     const c=dead?'var(--danger)':(t.is_mcp?'#bc8cff':'var(--ok)');
-    return `<g><rect x="0" y="${y}" width="${W}" height="${RH}" fill="transparent"/>
+    return `<g class="bar-grp" onclick="drawerTool(${i})"><rect x="0" y="${y}" width="${W}" height="${RH}" fill="transparent"/>
       <text x="${PL-8}" y="${y+12}" text-anchor="end" style="fill:${dead?'#ff9bce':'var(--fg)'};font-size:10px">${esc(t.name)}</text>
       <rect x="${PL}" y="${y+3}" width="${Math.max(w,1)}" height="${RH-7}" fill="${c}" opacity="${dead?.85:.72}">
         <title>${esc(t.name)}\n${fmt(t.schema_tokens)} tok × ${t.turns_resident} turns = ${fmt(t.total_schema_cost)}\ninvocations: ${t.invocations}</title></rect>
@@ -380,6 +620,10 @@ function tog(i){
 
 /* ---------------- assembly ---------------- */
 function render(s){
+  CUR_SESSION = s;
+  CTXDATA = [];
+  buildSpanMap(s.timeline||[]);
+  closeDrawer();
   const rows=s.reconciliation||[];
   const bad=rows.filter(r=>!(r.input_match&&r.output_match));
   let rec='';
