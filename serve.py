@@ -271,7 +271,7 @@ def main():
         follower = ingest.FollowIngest(DB, on_batch=_debounce.trigger)
         follower.start()
 
-    srv = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
+    srv = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
     print(f"dashboard  http://localhost:{PORT}/")
     print(f"db         {DB}  ({counts['spans']} spans, {counts['sessions']} session rows)")
     print(f"follow     {'on' if FOLLOW else 'off (AGENTDASH_FOLLOW=0)'}")
