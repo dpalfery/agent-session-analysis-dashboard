@@ -1,0 +1,146 @@
+# ObservMe project setup guide (inactive until explicitly adopted).
+# Every setting below is commented, so global configuration and built-in defaults remain effective.
+# To add project overrides, uncomment observme: plus only the sections and settings you want to adopt.
+#
+# observme:
+#   enabled: true
+#   environment: development
+#   tenant: local-dev
+#
+#   otlp:
+#     endpoint: http://localhost:4318
+#     protocol: http/protobuf
+#     timeoutMs: 3000
+#     headers: {}
+#     tls:
+#       insecureSkipVerify: false
+#     signalEndpoints:
+#       traces: http://localhost:4318/v1/traces
+#       metrics: http://localhost:4318/v1/metrics
+#       logs: http://localhost:4318/v1/logs
+#
+#   resource:
+#     attributes:
+#       service.name: observme-pi-extension
+#       observme.tenant.id: local-dev
+#       pi.project.name: local-project
+#       deployment.environment.name: development
+#
+#   workflow:
+#     idEnv: OBSERVME_WORKFLOW_ID
+#     enabled: true
+#     maxDepthWarning: 5
+#     maxFanoutWarning: 20
+#
+#   agent:
+#     idEnv: OBSERVME_AGENT_ID
+#     parentIdEnv: OBSERVME_PARENT_AGENT_ID
+#     rootIdEnv: OBSERVME_ROOT_AGENT_ID
+#     parentSessionIdEnv: OBSERVME_PARENT_SESSION_ID
+#     parentTraceIdEnv: OBSERVME_PARENT_TRACE_ID
+#     parentSpanIdEnv: OBSERVME_PARENT_SPAN_ID
+#     depthEnv: OBSERVME_AGENT_DEPTH
+#     spawnIdEnv: OBSERVME_SPAWN_ID
+#     propagateTraceContext: true
+#     propagateToSubagents: true
+#     childIdentityEnvelopeVersionEnv: OBSERVME_CHILD_IDENTITY_ENVELOPE_VERSION
+#     displayNameEnv: OBSERVME_AGENT_DISPLAY_NAME
+#     roleEnv: OBSERVME_AGENT_ROLE
+#     capabilityEnv: OBSERVME_AGENT_CAPABILITY
+#     # Opt in to one validated, branch-local custom entry for reload/resume recovery.
+#     # This entry never participates in LLM context.
+#     writeCorrelationEntry: false
+#
+#   traces:
+#     enabled: true
+#     sampleRatio: 1.0
+#     batch:
+#       maxQueueSize: 2048
+#       maxExportBatchSize: 512
+#       scheduledDelayMillis: 1000
+#       exportTimeoutMillis: 3000
+#
+#   metrics:
+#     enabled: true
+#     exportIntervalMillis: 15000
+#     exportTimeoutMillis: 3000
+#     activeAgentLeaseDurationMillis: 60000
+#
+#   logs:
+#     enabled: true
+#     batch:
+#       maxQueueSize: 2048
+#       maxExportBatchSize: 512
+#       scheduledDelayMillis: 1000
+#
+#   capture:
+#     # Content capture is opt-in. To export redacted local debug content,
+#     # set only the specific capture flags you need to true and keep
+#     # privacy.redactionEnabled enabled.
+#     prompts: false
+#     responses: false
+#     thinking: false
+#     toolArguments: false
+#     toolResults: false
+#     bashCommands: false
+#     bashOutput: false
+#     # Reserved compatibility flag; direct live path capture is not implemented.
+#     # privacy.pathMode still applies to paths embedded in other captured content.
+#     filePaths: false
+#
+#   privacy:
+#     redactionEnabled: true
+#     # Set this to true only when you intentionally accept unredacted
+#     # sensitive-content export from this trusted project.
+#     allowUnsafeCapture: false
+#     allowInsecureTransport: true
+#     tenantSaltEnv: OBSERVME_HASH_SALT
+#     pathMode: hash
+#     customRedactionPatterns: []
+#
+#   limits:
+#     maxPromptChars: 12000
+#     maxResponseChars: 12000
+#     maxToolArgumentChars: 8000
+#     maxToolResultChars: 16000
+#     maxBashOutputChars: 16000
+#     maxLogBodyChars: 32000
+#     maxActiveAgentRuns: 16
+#     maxActiveTurns: 128
+#     maxActiveToolCalls: 1024
+#     maxActiveLlmRequests: 128
+#     maxActiveSubagentSpawns: 128
+#     maxActiveAgentWaits: 128
+#     maxActiveAgentJoins: 128
+#
+#   query:
+#     enabled: true
+#     timeoutMs: 5000
+#     maxLogs: 50
+#     maxTraces: 20
+#     maxMetricSeries: 20
+#     maxAgents: 20
+#     links:
+#       # Uses the bundled stack's Grafana Explore fallback.
+#       traceUrlTemplate: http://localhost/explore?left=...
+#     grafana:
+#       # Bundled local command path: Grafana behind nginx on localhost.
+#       url: http://localhost
+#       # Preferred: set a Grafana service-account token in this env var.
+#       token: ${OBSERVME_GRAFANA_TOKEN}
+#       # Local fallback: set OBSERVME_GRAFANA_PASSWORD from observability-stack/secrets/grafana_admin_password.
+#       username: "admin"
+#       password: ${OBSERVME_GRAFANA_PASSWORD}
+#       datasourceUids:
+#         tempo: tempo
+#         loki: loki
+#         prometheus: prometheus
+#       tls:
+#         # The bundled local endpoint is HTTP; production HTTPS should verify its CA.
+#         insecureSkipVerify: false
+#       transport:
+#         # localhost does not require a forced IPv4 lookup in the bundled profile.
+#         preferIPv4: false
+#
+#   shutdown:
+#     flushTimeoutMs: 3000

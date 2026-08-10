@@ -194,6 +194,10 @@ class Handler(SimpleHTTPRequestHandler):
                         "sources": ing,
                     })
 
+                if path == "/api/compare":
+                    from agentdash import compare
+                    return self._send(compare.build(s))
+
                 if path == "/api/quarantine":
                     return self._send({"spans": s.quarantined()})
 

@@ -22,9 +22,16 @@
     "",
     "A null field contributes NOTHING and is not treated as zero. A model with no",
     "usable rate is reported as 'no published rate' in the UI, never as $0.00.",
-    "Populate rates ONLY from the published table -- never from memory or inference."
+    "Populate rates ONLY from the published table -- never from memory or inference.",
+    "",
+    "APPLIES_TO scopes this table to the harnesses it was transcribed for. This",
+    "is not bookkeeping: pi also runs gpt-5.6-luna, through a different provider",
+    "at a different price, and without the scope every such turn would silently",
+    "acquire GitHub's credit rate. Harnesses that price their own calls (pi",
+    "reports pi.llm.cost.*_usd) need no entry here at all."
   ],
 
+  "applies_to": ["copilot"],
   "credit_usd": 0.01,
   "currency": "USD",
   "source": "https://docs.github.com/copilot/reference/copilot-billing/models-and-pricing",

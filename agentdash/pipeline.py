@@ -13,12 +13,17 @@ import sys
 
 from . import views
 from .adapters import registry
-from .canonical import validate_tokens
+from .canonical import SCHEMA_VERSION, validate_tokens
 from .cost import load_rates
 from .tokens import Counter
 
 
 def rebuild(store, rates_path="rates.json", harness=None, verbose=True):
+    # add_spans/INSERT OR IGNORE never revisits a stored span, so a detection fix
+    # only routes new ingests. Migrate stored spans once per schema version.
+    if store.get_meta("harness_reclassify_version") != str(SCHEMA_VERSION):
+        store.reclassify(registry.harness_resolver(store.raw_spans()))
+        store.set_meta("harness_reclassify_version", str(SCHEMA_VERSION))
     rates = load_rates(rates_path)
     counter = Counter(store)
     results = {}
@@ -85,8 +90,9 @@ def rebuild(store, rates_path="rates.json", harness=None, verbose=True):
         store.set_meta(f"meta:{hname}", json.dumps({
             "harness": hname,
             "adapter_version": adapter.version,
+            "notes": adapter.notes(canon),
             "orphans": _orphan_summary(orphans),
-            **_attribute_presence(raw),
+            **_attribute_presence(raw, getattr(adapter, "watched_attributes", None)),
         }))
         store.db.commit()
         results[hname] = {
@@ -112,29 +118,40 @@ def rebuild(store, rates_path="rates.json", harness=None, verbose=True):
     return results
 
 
+def aggregate_id(harness):
+    """The combined-view session id for one harness.
+
+    Harness-scoped because session_id is the primary key and every harness
+    builds an aggregate: with a bare "__all__" the second harness to rebuild
+    collided with the first, and replace_sessions() only clears its own
+    harness's rows so the insert failed outright.
+    """
+    return f"__all__:{harness}"
+
+
 def _aggregate_session(harness, sessions, spans):
     from .canonical import Session, Request
     reqs = [r for s in sessions for r in s.requests]
     reqs.sort(key=lambda r: r.timestamp or "")
     times = sorted(s.timestamp for s in spans if s.timestamp)
     return Session(
-        session_id="__all__", harness=harness,
-        label=f"All {len(sessions)} sessions combined",
+        session_id=aggregate_id(harness), harness=harness,
+        label=f"All {len(sessions)} {harness} sessions combined",
         requests=reqs, span_ids=[s.span_id for s in spans],
         started=times[0] if times else None, ended=times[-1] if times else None)
 
 
-# Attributes the UI reports on explicitly. Absent everywhere -> "not recorded";
-# present on only some spans -> the UI says so rather than implying coverage.
+# Fallback watch list. Each adapter overrides it with the attributes that are
+# meaningful for ITS harness -- reporting a Copilot attribute as "missing" from
+# a pi export says nothing, since it was never going to be there.
 WATCHED_ATTRS = [
     "gen_ai.usage.cache_creation.input_tokens",
-    "github.copilot.tool.parameters.skill_name",
     "error.type",
 ]
 KNOWN_OPS = ("invoke_agent", "chat", "execute_tool", "execute_hook", "embeddings")
 
 
-def _attribute_presence(raw_spans):
+def _attribute_presence(raw_spans, watched=None):
     import collections
     present = collections.Counter()
     ops = set()
@@ -144,10 +161,11 @@ def _attribute_presence(raw_spans):
         if o:
             ops.add(o)
     n = len(raw_spans)
+    watched = watched or WATCHED_ATTRS
     return {
         "span_count": n,
-        "missing_attributes": [a for a in WATCHED_ATTRS if present.get(a, 0) == 0],
-        "partial_attributes": {a: present[a] for a in WATCHED_ATTRS
+        "missing_attributes": [a for a in watched if present.get(a, 0) == 0],
+        "partial_attributes": {a: present[a] for a in watched
                                if 0 < present.get(a, 0) < n},
         "absent_span_types": [o for o in KNOWN_OPS if o not in ops],
     }

@@ -174,9 +174,13 @@ function drawerTurn(i){
   if(t.request_start)
     html+=`<div class="note dr-note">New request starts at this turn: <em>${esc(t.request_start)}</em></div>`;
 
-  const attrs=(SPAN_MAP[t.spanId]||{}).attributes||{};
-  const inMsgs=tryJSON(attrs['gen_ai.input.messages']);
-  const outMsgs=tryJSON(attrs['gen_ai.output.messages']);
+  // Content is read by CANONICAL key, never by a raw attribute name: the two
+  // harnesses call these different things, and hardcoding either one's key
+  // makes this drawer render blank for the other while looking like a session
+  // that simply had no content.
+  const node=SPAN_MAP[t.spanId]||{};
+  const C=node.content||{};
+  const inMsgs=C.input_messages, outMsgs=C.output_messages;
   if(inMsgs){
     const users=inMsgs.filter(m=>m.role==='user');
     const lastUser=users.length?[users[users.length-1]]:[];
@@ -187,12 +191,22 @@ function drawerTurn(i){
     const conv=fmtMessages(outMsgs);
     if(conv) html+=`<div class="dr-sec"><div class="dr-shead">Model response</div>${conv}</div>`;
   }
-  if(!inMsgs&&!outMsgs){
-    const has=Object.keys(attrs).length;
-    html+= has
+  // Harnesses that flatten the prompt to one string instead of emitting per
+  // message parts (pi does) land here.
+  if(!inMsgs&&C.prompt_text)
+    html+=`<div class="dr-sec"><div class="dr-shead">Prompt (flattened by the harness)</div>
+      ${fmtText(C.prompt_text)}</div>`;
+  if(!outMsgs&&C.response_text)
+    html+=`<div class="dr-sec"><div class="dr-shead">Model response</div>${fmtText(C.response_text)}</div>`;
+  if(C.reasoning_text)
+    html+=`<details class="dr-xml"><summary><span class="dr-xml-tag">reasoning</span></summary>
+      <pre class="dr-pre">${esc(C.reasoning_text)}</pre></details>`;
+
+  if(!Object.keys(C).length){
+    const attrs=node.attributes||{};
+    html+= Object.keys(attrs).length
       ? `<div class="dr-sec"><div class="dr-shead">Span attributes</div>${kvTable(attrs)}</div>`
-      : `<div class="note dr-note">No message content was recorded on this span${
-          attrs['gen_ai.input.messages']?' (it was truncated during export)':''}.</div>`;
+      : `<div class="note dr-note">No message content was recorded on this span.</div>`;
   }
   openDrawer(`Turn ${t.index}`, html);
 }
@@ -209,12 +223,12 @@ function drawerCtx(ci){
   const ctx=CUR_SESSION.context||{};
   const src=d.rowIdx===0?ctx.first:ctx.last;
   const turn=src?CUR_SESSION.turns[(src.turn||1)-1]:null;
-  const attrs=turn?((SPAN_MAP[turn.spanId]||{}).attributes||{}):{};
+  const C=turn?((SPAN_MAP[turn.spanId]||{}).content||{}):{};
   if(d.key==='System prompt'){
-    const sys=attrs['gen_ai.system_instructions'];
+    const sys=C.system_instructions;
     if(sys) html+=`<div class="dr-sec"><div class="dr-shead">System prompt text</div>${fmtText(sys)}</div>`;
   }else if(d.key==='built-in tools'||d.key.startsWith('mcp: ')){
-    const defs=tryJSON(attrs['gen_ai.tool.definitions']);
+    const defs=C.tool_definitions;
     if(defs){
       const mine=defs.filter(td=>{
         const n=(td.name||(td.function||{}).name||'');
@@ -228,7 +242,7 @@ function drawerCtx(ci){
           ${f.parameters?kvTable(f.parameters):''}</details>`;}).join('')}</div>`;
     }
   }else if(d.key==='Conversation history'||d.key==='File contents via tool results'){
-    const msgs=tryJSON(attrs['gen_ai.input.messages']);
+    const msgs=C.input_messages;
     if(msgs){
       const conv = d.key==='Conversation history'
         ? fmtMessages(msgs.map(m=>({...m,parts:(m.parts||[]).filter(p=>p.type!=='tool_result'&&p.type!=='tool_call_response')})))
@@ -259,8 +273,7 @@ function drawerTool(i){
     ${statRow('Server',esc(t.server)+(t.is_mcp?' (MCP)':''))}</div>`;
   // Schema definition off the first chat span that carried tool definitions.
   const turn=(s.turns||[]).find(x=>x.has_tool_defs);
-  const attrs=turn?((SPAN_MAP[turn.spanId]||{}).attributes||{}):{};
-  const defs=tryJSON(attrs['gen_ai.tool.definitions']);
+  const defs=turn?((SPAN_MAP[turn.spanId]||{}).content||{}).tool_definitions:null;
   const def=defs&&defs.find(td=>(td.name||(td.function||{}).name)===t.name);
   if(def){
     const f=def.function||def;
@@ -274,32 +287,69 @@ function drawerTool(i){
 /* ---------------- cost ---------------- */
 // Rates come from rates.json and are never inferred. A model with no published
 // rate renders as "no published rate", never as $0.00.
+// Two pricing bases exist and must never be presented as one number:
+//   published_rates   -- derived from a published table (Copilot credits)
+//   harness_reported  -- the figure the harness computed itself (pi)
+// The basis is stated wherever the money is, because the same "$" means a
+// different measurement on each side.
+const BASIS_LABEL = {
+  published_rates: 'published rate table',
+  harness_reported: 'reported by the harness',
+};
 function costView(s){
   const c=s.summary.cost;
   if(!c) return '';
   const R=D.rates||{};
-  const unpriced = c.status==='no_rate';
-  const rows=c.by_model.map(m=>`<tr class="${m.status==='no_rate'?'unused':''}">
-      <td class="l">${esc(m.model)}${m.status==='no_rate'?'<span class="pill dead">no rate</span>'
-        :m.status==='partial'?'<span class="pill">partial rate</span>':''}</td>
+  const reported = c.basis==='harness_reported';
+  const rows=c.by_model.map(m=>{
+    const noRate = m.status==='no_rate';
+    const pill = noRate?'<span class="pill dead">no rate</span>'
+      : m.status==='partial'?'<span class="pill">partial rate</span>'
+      : m.status==='out_of_scope'?'<span class="pill">self-priced</span>':'';
+    return `<tr class="${noRate?'unused':''}">
+      <td class="l">${esc(m.model)}${pill}</td>
       <td>${m.turns}</td><td>${fmt(m.input)}</td><td>${fmt(m.output)}</td>
-      <td>${cell(fmtCredits(m.credits))}</td><td>${cell(usd(m.usd))}</td></tr>`).join('');
-  const banner = unpriced
-    ? `<div class="note bad"><strong>No cost computed — per-model rates are not populated.</strong>
-       Every model in this run is missing a published rate, so cost is shown as
-       <em>not recorded</em> rather than $0.00. Fill in
-       <span class="mono">rates.json</span> (credits per request and/or per 1M tokens, plus a
-       <span class="mono">source</span> URL) and re-run <span class="mono">analyze.py</span>.</div>`
-    : c.status==='partial'
-      ? `<div class="note"><strong>Partial pricing — treat this as a floor.</strong>
-         ${c.priced_turns} of ${c.priced_turns+c.unpriced_turns} turns priced;
-         ${c.unpriced_turns} turn(s) ran on a model with no published rate, and some priced models
-         bill token classes that have no rate set. The real total is higher.</div>`
-      : '';
+      <td>${cell(fmtCredits(m.credits))}</td><td>${cell(usd(m.usd))}</td></tr>`;
+  }).join('');
+
+  const banner = reported
+    ? `<div class="note"><strong>Priced by the harness, not by
+       <span class="mono">rates.json</span>.</strong> This harness reports what its provider
+       charged for each call, which is better than anything this dashboard could derive — so that
+       figure is carried through verbatim and no credit rates are applied.
+       <br><strong>The rate table is deliberately not consulted here.</strong>
+       <span class="mono">rates.json</span> declares <span class="mono">applies_to</span> and this
+       harness is not in it. The guard matters because model names collide across harnesses: the same
+       model can appear in GitHub's table and also run here through a different provider at a
+       different price, and applying the table anyway would produce a plausible, wrong total instead
+       of no total.</div>`
+    : c.status==='no_rate'
+      ? `<div class="note bad"><strong>No cost computed — per-model rates are not populated.</strong>
+         Every model in this run is missing a published rate, so cost is shown as
+         <em>not recorded</em> rather than $0.00. Fill in
+         <span class="mono">rates.json</span> (credits per request and/or per 1M tokens, plus a
+         <span class="mono">source</span> URL) and rebuild.</div>`
+      : c.status==='partial'
+        ? `<div class="note"><strong>Partial pricing — treat this as a floor.</strong>
+           ${c.priced_turns} of ${c.priced_turns+c.unpriced_turns} turns priced;
+           ${c.unpriced_turns} turn(s) ran on a model with no published rate, and some priced models
+           bill token classes that have no rate set. The real total is higher.</div>`
+        : '';
+
+  const provenance = reported
+    ? `Source: the harness's own <span class="mono">cost</span> attributes, cross-checked per call
+       against the total it reports alongside them.`
+    : `Rate source:
+       ${R.source?`<a href="${esc(R.source)}" style="color:var(--accent)">${esc(R.source)}</a>`
+         :'<span class="absent">not set</span>'}
+       ${R.retrieved?` · retrieved ${esc(R.retrieved)}`:''}`;
+
   return `<div class="card">
-    <div class="hd"><h2>6 · Cost</h2>
-    <p class="sub">GitHub Copilot credits billing — 1 credit = ${R.credit_usd!==null&&R.credit_usd!==undefined?usd(R.credit_usd):'?'}.
-      Rates are read from <span class="mono">rates.json</span>; nothing here is inferred.</p></div>
+    <div class="hd"><h2>6 · Cost <span class="pill">${esc(BASIS_LABEL[c.basis]||'no basis')}</span></h2>
+    <p class="sub">${reported
+      ? 'USD as computed by the harness for its own provider. Credits do not apply.'
+      : `GitHub Copilot credits billing — 1 credit = ${R.credit_usd!==null&&R.credit_usd!==undefined?usd(R.credit_usd):'?'}.
+         Rates are read from <span class="mono">rates.json</span>; nothing here is inferred.`}</p></div>
     ${banner}
     <table><thead><tr><th class="l">Model</th><th>Turns</th><th>Input tok</th><th>Output tok</th>
       <th>Credits</th><th>Cost</th></tr></thead>
@@ -307,10 +357,7 @@ function costView(s){
       <tr class="srv"><td class="l">Total</td><td>${c.priced_turns+c.unpriced_turns}</td>
         <td>${fmt(s.summary.total_input)}</td><td>${fmt(s.summary.total_output)}</td>
         <td>${cell(fmtCredits(c.credits))}</td><td>${cell(usd(c.usd))}</td></tr></tbody></table>
-    <p class="sub" style="margin-top:10px">Rate source:
-      ${R.source?`<a href="${esc(R.source)}" style="color:var(--accent)">${esc(R.source)}</a>`
-        :'<span class="absent">not set</span>'}
-      ${R.retrieved?` · retrieved ${esc(R.retrieved)}`:''}</p>
+    <p class="sub" style="margin-top:10px">${provenance}</p>
   </div>`;
 }
 
@@ -341,7 +388,11 @@ function strip(s){
     ['Turns', u.turn_count, u.reported_turn_count!==null ? 'reported: '+u.reported_turn_count : ''],
     ['Wall clock', dur(u.duration_ms), ''],
     ['Tool calls', u.tool_calls, u.tools_invoked+' distinct'],
-    ['Tools offered', u.tools_offered, (u.tools_offered-u.tools_invoked)+' never called'],
+    // 0 offered next to real tool calls would be a false finding, not a small
+    // number: it means the harness never exported its schemas.
+    ...(((s.coverage||{}).tool_definitions||0) > 0
+        ? [['Tools offered', u.tools_offered, (u.tools_offered-u.tools_invoked)+' never called']]
+        : [['Tools offered', null, 'schemas not exported by '+s.harness]]),
     ['Errors', u.error_count, u.error_count===0 ? 'error.type absent; all Ok' : ''],
     ['Median TTFT', u.median_ttft_ms!==null ? Math.round(u.median_ttft_ms)+'ms' : null, ''],
     ['Models', u.models.length ? u.models.join(', ') : null, u.aux_chat_calls ? '+'+u.aux_chat_calls+' aux calls' : ''],
@@ -444,7 +495,23 @@ function turnChart(s){
 /* ---------------- view 2: context composition ---------------- */
 function ctxChart(s){
   const c=s.context;
-  if(!c.first) return '<div class="card"><h2>2 · Context composition</h2><p class="sub">No chat span in this session carried input messages.</p></div>';
+  if(!c.first){
+    const cov=s.coverage||{};
+    const flat=cov.flattened_prompt||0;
+    return `<div class="card"><div class="hd"><h2>2 · Context composition</h2>
+      <p class="sub">Cannot be broken down for this session.</p></div>
+      <div class="note bad"><strong>No model turn exported its conversation content.</strong>
+        ${cov.chat_spans?`${cov.chat_spans} model turn(s) here reported their token counts but not the
+          messages behind them`:'There are no model turns in this session'}${flat
+          ? `. ${fmt(flat)} turn(s) did export a flattened prompt string, but it is a reduced
+             rendering rather than the request — bucketing it would understate every band and show
+             the shortfall as tokenizer drift, which it is not, so it is deliberately not charted.`
+          : '.'}
+        Token spend per turn (view 1) and cost (view 6) are unaffected — those come from counters,
+        not content.</div>
+      ${(s.notes||[]).length?`<p class="sub">See the harness note above for how to enable it.</p>`:''}
+    </div>`;
+  }
   const rows=[['First turn (#'+c.first.turn+')',c.first]];
   if(c.last) rows.push(['Last turn (#'+c.last.turn+')',c.last]);
   else rows.push(['Last turn','__single__']);
@@ -509,7 +576,31 @@ function ctxChart(s){
 /* ---------------- view 3: tool cost ranking ---------------- */
 function toolView(s){
   const rows=s.tools.filter(t=>t.in_definitions);
-  if(!rows.length) return '<div class="card"><h2>3 · Tool cost ranking</h2><p class="sub">No chat span in this session carried tool definitions.</p></div>';
+  if(!rows.length){
+    // "No schemas" and "schemas never exported" look identical here and are not
+    // the same fact — especially when the session plainly invoked tools.
+    const cov=s.coverage||{}, called=s.summary.tool_calls||0;
+    const invoked=s.tools.filter(t=>t.invocations>0)
+      .sort((a,b)=>b.invocations-a.invocations);
+    const list=invoked.length
+      ? `<div class="scroll cap"><table>
+         <thead><tr><th class="l">Tool</th><th>Invocations</th><th>Result tok</th></tr></thead>
+         <tbody>${invoked.map(t=>`<tr><td class="l">${esc(t.name)}</td><td>${t.invocations}</td>
+           <td>${cell(t.result_tokens===null?null:fmt(t.result_tokens))}</td></tr>`).join('')}
+         </tbody></table></div>` : '';
+    return `<div class="card"><div class="hd"><h2>3 · Tool cost ranking</h2>
+      <p class="sub">Schema cost cannot be computed for this harness.</p></div>
+      <div class="note bad"><strong>${esc(s.harness)} does not export tool definitions.</strong>
+        ${called
+          ? `This session made <strong>${fmt(called)}</strong> tool call(s) across
+             <strong>${s.summary.tools_invoked}</strong> distinct tools, so the model was certainly
+             offered a schema block — the harness reports its size as a count only, never the
+             schemas themselves, so there is nothing to weigh.`
+          : 'No tool calls were made either, so there is nothing to weigh.'}
+        The ranking below is therefore <em>invocations only</em>: what was called, not what it cost
+        to keep offering. That is a gap in the telemetry, not a session without tool overhead.</div>
+      ${list}</div>`;
+  }
   const u=s.summary;
   const max=Math.max(...rows.map(t=>t.total_schema_cost||0))||1;
   const W=1180, PL=310, PR=118, RH=17, H=rows.length*RH+12;
@@ -618,6 +709,92 @@ function tog(i){
   e.style.display=e.style.display==='none'?'block':'none';
 }
 
+/* ---------------- harness comparison ----------------
+   Renders /api/compare. The server decides what is comparable; this only draws
+   it. The one rule enforced here is visual: a metric a harness does not report
+   never renders as a number, a bar, or a blank — it says so, because a reader
+   scanning a table will otherwise read an empty cell as zero. */
+const CMPFMT = {
+  int:      v => fmt(Math.round(v)),
+  float1:   v => v.toFixed(1),
+  pct:      v => pct(v),
+  usd:      v => usd(v),
+  usd4:     v => '$'+v.toFixed(4),
+  ms:       v => Math.round(v)+'ms',
+  duration: v => dur(v),
+  text:     v => esc(String(v)),
+};
+function cmpCell(cell, fmtKind){
+  if(!cell || !cell.available)
+    return `<td class="absent" title="This harness does not export the data this metric needs">not reported</td>`;
+  const v = cell.value;
+  if(v===null||v===undefined) return `<td class="absent">not recorded</td>`;
+  const f = CMPFMT[fmtKind]||CMPFMT.int;
+  const main = typeof v==='number' ? f(v) : esc(String(v));
+  const per = cell.per_turn!==null&&cell.per_turn!==undefined
+    ? `<div class="n">${CMPFMT.int(cell.per_turn)} / turn</div>` : '';
+  return `<td><span class="mono">${main}</span>${per}</td>`;
+}
+function compareView(c){
+  const names = c.names;
+  if(names.length<2)
+    return `<div class="card"><h2>Harness comparison</h2>
+      <p class="sub">Only <strong>${esc(names[0]||'—')}</strong> has derived sessions in the store.
+      A comparison needs at least two harnesses; ingest spans from another one and rebuild.</p></div>`;
+
+  const head = names.map(n=>`<th>${esc(n)}</th>`).join('');
+  let body='', grp=null;
+  c.metrics.forEach(m=>{
+    if(m.group!==grp){
+      grp=m.group;
+      body+=`<tr class="srv"><td class="l" colspan="${names.length+1}">${esc(grp)}</td></tr>`;
+    }
+    const label = m.note
+      ? `${esc(m.label)} <span class="dr-dim" title="${esc(m.note)}">ⓘ</span>`
+      : esc(m.label);
+    body+=`<tr><td class="l">${label}</td>${
+      names.map(n=>cmpCell(m.cells[n], m.fmt)).join('')}</tr>`;
+  });
+
+  const cards = c.harnesses.map(h=>{
+    const cost=h.cost||{};
+    return `<div class="tile" style="text-align:left">
+      <div class="k">${esc(h.harness)}</div>
+      <div class="v" style="font-size:15px">${h.sessions} session${h.sessions===1?'':'s'}</div>
+      <div class="n">${esc((h.models||[]).join(', ')||'no model recorded')}</div>
+      <div class="n">cost basis: ${esc(BASIS_LABEL[cost.basis]||'none')}</div></div>`;
+  }).join('');
+
+  const notes = c.harnesses.filter(h=>(h.notes||[]).length).map(h=>
+    `<div class="note"><strong>${esc(h.harness)} — what it does not export.</strong>
+     <ul style="margin:6px 0 0 18px;padding:0">${
+       h.notes.map(n=>`<li style="margin:3px 0">${esc(n)}</li>`).join('')}</ul></div>`).join('');
+
+  return `<div class="card">
+    <div class="hd"><h2>Harness comparison</h2>
+    <p class="sub">Every row is a canonical metric — computed the same way on both sides after each
+      adapter reconciled its own harness's conventions. Nothing here reads a harness-specific
+      attribute.</p></div>
+    <div class="note bad"><strong>Read the per-turn column, not the totals.</strong>
+      ${esc(c.caveat)}</div>
+    <div class="strip">${cards}</div>
+    <div class="scroll cap"><table>
+      <thead><tr><th class="l">Metric</th>${head}</tr></thead>
+      <tbody>${body}</tbody></table></div>
+    ${notes}
+  </div>`;
+}
+function renderCompare(c){
+  CUR_SESSION=null;
+  closeDrawer();
+  document.getElementById('meta').innerHTML =
+    `Comparing ${c.names.map(esc).join(' vs ')} on canonical metrics`;
+  document.getElementById('app').innerHTML = compareView(c);
+  document.getElementById('foot').innerHTML =
+    `Store: <span class="mono">sessions.db</span> — ${fmt(D.span_count)} spans across
+     ${c.names.length} harness(es). Metrics are computed from each harness's combined view.`;
+}
+
 /* ---------------- assembly ---------------- */
 function render(s){
   CUR_SESSION = s;
@@ -649,11 +826,18 @@ function render(s){
   const aux = u.aux_chat_calls ? `<div class="note">${u.aux_chat_calls} auxiliary
     <span class="mono">${esc(u.aux_models.join(', '))}</span> call(s) in this trace (conversation-title generation)
     are excluded from the per-turn charts but did cost ${fmt(u.aux_input)} in / ${fmt(u.aux_output)} out.</div>` : '';
+  // What this harness does not export, in its adapter's own words. Without it
+  // an empty view reads as "nothing happened" rather than "never reported".
+  const notes = (s.notes||[]).length
+    ? `<div class="note"><strong>What ${esc(s.harness)} does not export.</strong>
+       <ul style="margin:6px 0 0 18px;padding:0">${
+         s.notes.map(n=>`<li style="margin:3px 0">${esc(n)}</li>`).join('')}</ul></div>` : '';
   document.getElementById('meta').innerHTML =
-    `${esc(s.label)}` + (s.repo?` · <span class="mono">${esc(s.branch||'')}</span> · ${esc(s.repo.split('/').pop())}`:'') +
+    `<span class="pill">${esc(s.harness)}</span> ${esc(s.label)}` +
+    (s.repo?` · <span class="mono">${esc(s.branch||'')}</span> · ${esc(s.repo.split('/').pop())}`:'') +
     (s.agent_name?` · agent: ${esc(s.agent_name)}`:'') + ` · ${s.span_count} spans`;
   document.getElementById('app').innerHTML =
-    strip(s)+rec+sub+reqs+aux+costView(s)+toolView(s)+turnChart(s)+ctxChart(s)+timeline(s);
+    strip(s)+rec+sub+reqs+aux+notes+costView(s)+toolView(s)+turnChart(s)+ctxChart(s)+timeline(s);
 }
 
 
@@ -695,8 +879,15 @@ function renderFoot(){
 }
 
 /* ---------------- session switching ---------------- */
+const COMPARE_ID = '__compare__';
+
 async function show(id){
   try{
+    if(id===COMPARE_ID){
+      CUR = id;
+      HMETA = {};
+      return renderCompare(await api('api/compare'));
+    }
     const p = await api('api/session/'+encodeURIComponent(id));
     CUR = id;
     HMETA = (D.harnesses||{})[p.harness] || {};
@@ -705,19 +896,41 @@ async function show(id){
   }catch(e){ fail('session '+id, e); }
 }
 
+const isAggregate = id => id.startsWith('__all__');
+
 function fillPicker(){
   const pick = document.getElementById('pick');
-  // aggregate last; real sessions in chronological order
-  const real = SESSIONS.filter(s=>s.session_id!=='__all__');
-  const agg  = SESSIONS.find(s=>s.session_id==='__all__');
-  const opts = real.map(s=>[s.session_id,
-      `${s.is_subagent?'↳ ':''}${(s.label||s.session_id).slice(0,52)} — ${s.turn_count} turns`
-      + (s.is_subagent?` [subagent: ${s.agent_name}]`:'')]);
-  if(agg) opts.push([agg.session_id, `${agg.label} — ${agg.turn_count} turns`]);
-  pick.innerHTML = opts.map(([v,l])=>`<option value="${esc(v)}">${esc(l)}</option>`).join('');
-  // default to the busiest real session, as before
+  // Grouped by harness, because the store now holds more than one and a flat
+  // chronological list interleaves them into something unreadable.
+  const real = SESSIONS.filter(s=>!isAggregate(s.session_id));
+  const aggs = SESSIONS.filter(s=>isAggregate(s.session_id));
+  const byHarness = {};
+  real.forEach(s=>{ (byHarness[s.harness]=byHarness[s.harness]||[]).push(s); });
+
+  let html = '';
+  if(aggs.length>1)
+    html += `<option value="${COMPARE_ID}">⇄ Compare harnesses (${
+      aggs.map(a=>esc(a.harness)).join(' vs ')})</option>`;
+  Object.keys(byHarness).sort().forEach(h=>{
+    html += `<optgroup label="${esc(h)}">`;
+    const agg = aggs.find(a=>a.harness===h);
+    if(agg) html += `<option value="${esc(agg.session_id)}">▣ ${esc(agg.label)} — ${agg.turn_count} turns</option>`;
+    byHarness[h].forEach(s=>{
+      const label = `${s.is_subagent?'↳ ':''}${(s.label||s.session_id).slice(0,52)} — ${s.turn_count} turns`
+        + (s.is_subagent?` [subagent: ${s.agent_name}]`:'');
+      html += `<option value="${esc(s.session_id)}">${esc(label)}</option>`;
+    });
+    html += `</optgroup>`;
+  });
+  pick.innerHTML = html;
+
+  // Land on the comparison when there is one to make; otherwise the busiest
+  // session, as before.
   const busiest = real.reduce((b,s)=>(!b||s.turn_count>b.turn_count)?s:b, null);
-  pick.value = CUR || (busiest ? busiest.session_id : (agg?agg.session_id:''));
+  const preferred = aggs.length>1 ? COMPARE_ID
+    : (busiest ? busiest.session_id : (aggs[0]?aggs[0].session_id:''));
+  const valid = Array.from(pick.options).some(o=>o.value===CUR);
+  pick.value = valid ? CUR : preferred;
   pick.onchange = ()=>show(pick.value);
   return pick.value;
 }
@@ -738,9 +951,7 @@ async function pollStatus(){
     if(lastGen !== null && (st.generation !== lastGen || st.spans !== lastSpans)){
       lastGen = st.generation; lastSpans = st.spans;
       SESSIONS = (await api('api/sessions')).sessions;
-      const keep = CUR;
-      fillPicker();
-      await show(document.getElementById('pick').value = (keep || document.getElementById('pick').value));
+      await show(fillPicker());   // fillPicker keeps CUR when it is still valid
       return;
     }
     lastGen = st.generation; lastSpans = st.spans;

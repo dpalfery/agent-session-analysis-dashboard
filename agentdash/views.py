@@ -11,6 +11,7 @@ diff old against new.
 
 import collections
 import json
+import re
 import statistics
 from datetime import datetime
 
@@ -27,8 +28,43 @@ FRESH_JUMP_THRESHOLD = 0.25
 MCP_PREFIX = "mcp_"
 
 
+MAX_STRING = 2000
+
+
+_ISO_FRAC = re.compile(r"\.(\d+)")
+
+
 def _parse_ts(s):
-    return datetime.fromisoformat(s.replace("Z", "+00:00"))
+    """Parse an OTel timestamp, tolerating any fractional-second precision.
+
+    Python 3.9's fromisoformat accepts EXACTLY 3 or 6 fractional digits.
+    Copilot's exporter always emits 3, so this went unnoticed until pi, whose
+    exporter drops trailing zeros -- '2026-08-08T20:55:17.51Z' crashed the whole
+    rebuild. Normalize to 6 digits rather than requiring exporters to agree.
+    """
+    s = s.replace("Z", "+00:00")
+    return datetime.fromisoformat(
+        _ISO_FRAC.sub(lambda m: "." + m.group(1)[:6].ljust(6, "0"), s, count=1))
+
+
+def _clip(value, _depth=0):
+    """Bound payload size by clipping long LEAF strings, not whole structures.
+
+    Clipping a serialized blob instead would leave the browser a string that no
+    longer parses as JSON, which is how the message drawers came to silently
+    render nothing for large turns. Recursing keeps the shape intact so a
+    truncated tool result still displays as a tool result.
+    """
+    if isinstance(value, str):
+        return (value[:MAX_STRING] + f"... [truncated, {len(value)} chars]"
+                if len(value) > MAX_STRING else value)
+    if _depth >= 8:
+        return value
+    if isinstance(value, dict):
+        return {k: _clip(v, _depth + 1) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_clip(v, _depth + 1) for v in value]
+    return value
 
 
 def tool_def_name(t):
@@ -174,6 +210,9 @@ def build_payload(session, spans, adapter, rates, counter, known_servers, meta=N
             "cumulative_input": cum, "fresh_jump_pct": jump,
             "finish_reasons": s.finish_reasons, "ttft_ms": s.ttft_ms,
             "has_tool_defs": "tool_definitions" in s.content,
+            # Cost the harness computed for itself, when it does. Kept beside
+            # the rates-derived figure, never merged into it.
+            "reported_usd": s.reported_cost_usd,
             "request_start": _request_text(session, r)[:70] if r else None,
         })
 
@@ -286,13 +325,18 @@ def build_payload(session, spans, adapter, rates, counter, known_servers, meta=N
         "skills_invoked": dict(skills) or None,
     }
 
+    # A rate table is only consulted for a harness it declares itself to cover.
+    # Without that guard a pi turn on gpt-5.6-luna would silently pick up
+    # GitHub's credit price for the same model name -- see cost.py.
+    in_scope = costing.rates_apply_to(rates, session.harness)
     for t in turns:
-        c, st = costing.turn_credits(t, rates)
+        c, st = costing.turn_credits(t, rates) if in_scope else (None, "out_of_scope")
         t["credits"] = c
         t["cost_status"] = st
-        t["usd"] = None if (c is None or rates.get("credit_usd") is None) \
-            else c * rates["credit_usd"]
-    summary["cost"] = costing.cost_block(turns, rates)
+        t["usd"] = (c * rates["credit_usd"]
+                    if (c is not None and rates.get("credit_usd") is not None)
+                    else t.get("reported_usd"))
+    summary["cost"] = costing.cost_block(turns, rates, harness=session.harness)
     summary["schema_waste_cost"] = costing.schema_waste_cost(
         summary["unused_schema_per_turn"], defs_turns, turns, rates)
 
@@ -312,9 +356,12 @@ def build_payload(session, spans, adapter, rates, counter, known_servers, meta=N
             "status": s.status,
             "input": s.tokens.reported_input, "output": s.tokens.reported_output,
             "tool": s.tool_name,
-            "attributes": {k: (v[:2000] + f"... [truncated, {len(v)} chars]"
-                               if isinstance(v, str) and len(v) > 2000 else v)
-                           for k, v in s.raw_attributes.items()},
+            # CANONICAL content, addressed by the keys in canonical.CONTENT_KEYS.
+            # The UI reads this and never `attributes` -- otherwise every drawer
+            # would be hardcoded to one harness's attribute names and would
+            # silently render blank for the other.
+            "content": _clip(s.content),
+            "attributes": _clip(s.raw_attributes),
             "children": [node(c) for c in sorted(kids.get(s.span_id, []),
                                                  key=lambda x: x.timestamp or "")],
         }
@@ -339,17 +386,35 @@ def build_payload(session, spans, adapter, rates, counter, known_servers, meta=N
             "output_match": root.tokens.reported_output == co,
         })
 
+    # What the harness actually exported, counted over CANONICAL keys. A view
+    # with no data is otherwise indistinguishable from a session with no
+    # activity; these counts plus adapter.notes() say which it is.
+    coverage = {
+        "chat_spans": len(chats),
+        "tool_spans": len(tools),
+        "structured_messages": len([s for s in chats if "input_messages" in s.content]),
+        "flattened_prompt": len([s for s in chats if "prompt_text" in s.content]),
+        "system_instructions": len([s for s in chats if "system_instructions" in s.content]),
+        "tool_definitions": defs_turns,
+        "tool_results": len([s for s in tools if "tool_call_result" in s.content]),
+    }
+
     payload = {
         "id": session.session_id, "harness": session.harness,
         "label": session.label,
-        "traceId": by_id[session.requests[0].root_span_id].trace_id
-                   if session.requests else None,
+        # .get, not []: a request's root span can be absent from the buffer
+        # entirely (measured on pi, where 7 of 27 agent runs had no surviving
+        # root), and indexing here crashed the whole rebuild when it was.
+        "traceId": next((by_id[r.root_span_id].trace_id for r in session.requests
+                         if r.root_span_id in by_id),
+                        spans[0].trace_id if spans else None),
         "repo": session.repo, "branch": session.branch, "commit": session.commit,
         "agent_type": session.agent_type,
         "agent_name": session.agent_name,
         "is_subagent": session.is_subagent, "parent_session": session.parent_session,
         "span_count": len(spans), "summary": summary, "turns": turns,
         "tools": tool_rows, "servers": server_rows, "context": context,
+        "coverage": coverage, "notes": adapter.notes(spans),
         "timeline": timeline, "reconciliation": recon_rows,
         "requests": [{"request": (r.text or "")[:120], "timestamp": r.timestamp,
                       "turns": r.reported_turns, "model": r.model}

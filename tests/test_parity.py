@@ -8,6 +8,12 @@ grouping, auxiliary agents nested under real roots, per-model cache_creation).
 This diffs the new agentdash pipeline against the committed session.json
 produced by the old one. Any divergence is a port bug, not an improvement.
 
+SCOPED TO COPILOT. The store is multi-harness now, so this reads only copilot
+rows and copilot's aggregate. Without the scope, adding any second harness fails
+the gate for the wrong reason -- "a session exists that the fixture does not
+name" is exactly what SHOULD happen when you ingest a new harness, and it would
+have drowned out the signal this test exists to give.
+
     python3 tests/test_parity.py [old_session.json] [--db sessions.db]
 """
 
@@ -17,7 +23,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from agentdash import pipeline  # noqa: E402
 from agentdash.store import Store  # noqa: E402
+
+# This gate protects one harness's numbers. Other harnesses have their own tests.
+HARNESS = "copilot"
 
 # Figures verified against the old pipeline and hand-checked during development.
 EXPECTED = {
@@ -80,6 +90,18 @@ def deep_diff(a, b, path="", out=None):
     return out
 
 
+def _baseline_present(store, fixture):
+    """Is the baseline corpus itself in this store?
+
+    Checked on the real session ids, not the aggregate: every copilot corpus has
+    an aggregate, so matching on that would claim the baseline is present for
+    any data at all.
+    """
+    want = json.load(open(fixture))["sessions"]
+    real = [sid for sid in want if sid != "__all__"]
+    return any(store.session_payload(sid) is not None for sid in real)
+
+
 def main():
     args = [a for a in sys.argv[1:]]
     db = "sessions.db"
@@ -90,11 +112,28 @@ def main():
     old_path = args[0] if args else "session.json"
 
     store = Store(db)
-    rows = store.session_list()
-    new_sessions = [r for r in rows if r["session_id"] != "__all__"]
-    agg = store.session_payload("__all__")
+    rows = [r for r in store.session_list() if r["harness"] == HARNESS]
+    agg_id = pipeline.aggregate_id(HARNESS)
+    new_sessions = [r for r in rows if r["session_id"] != agg_id]
+    agg = store.session_payload(agg_id)
+    if agg is None:
+        print(f"no {HARNESS} sessions in {db} -- nothing to compare against.")
+        print(f"ingest the {HARNESS} corpus first, then re-run.")
+        return 0
 
-    print("=== absolute figures ===")
+    # EVERY figure below is baseline-relative, so establish first that the
+    # baseline is actually here. `.spans/` is gitignored, so a clone or a
+    # machine carrying only demo data has a different corpus entirely -- and
+    # reporting that as a wall of drift buries the one fact that matters.
+    fixture = Path(__file__).parent / "fixtures" / "parity-digest.json"
+    if fixture.exists() and not _baseline_present(store, fixture):
+        print(f"SKIPPED -- the baseline corpus is not in {db}.")
+        print(f"  {len(new_sessions)} {HARNESS} session(s) are present, but none of them are the "
+              f"ones the\n  frozen digests describe, so this gate cannot say anything about them.")
+        print(f"  Ingest the original exports into .spans/ to re-arm it.")
+        return 0
+
+    print(f"=== absolute figures ({HARNESS}) ===")
     check("sessions", len(new_sessions), EXPECTED["sessions"])
     check("aggregate turns", agg["summary"]["turn_count"], EXPECTED["turns"])
     check("aggregate input", agg["summary"]["total_input"], EXPECTED["aggregate_input"])
@@ -116,8 +155,11 @@ def main():
            if not (r["input_match"] and r["output_match"])]
     check("failing reconciliation rows", len(bad), 0)
 
-    # no validation errors anywhere
-    errs = store.problems(severity="error")
+    # no validation errors in THIS harness (another harness's problems are its
+    # own test's business, not evidence that this port regressed)
+    ours = {r["session_id"] for r in rows}
+    errs = [e for e in store.problems(severity="error")
+            if e["session_id"] is None or e["session_id"] in ours]
     check("validation errors", len(errs), 0)
     for e in errs[:5]:
         print(f"    {e['code']}: {e['message']}")
@@ -139,13 +181,16 @@ def main():
         return hashlib.sha256(
             json.dumps(o, sort_keys=True, default=str).encode()).hexdigest()[:16]
 
-    fixture = Path(__file__).parent / "fixtures" / "parity-digest.json"
     if fixture.exists():
         print("\n=== digest check vs committed fixture ===")
         want = json.load(open(fixture))["sessions"]
+        # The fixture predates multi-harness stores, when the combined view was
+        # a bare "__all__". Translate rather than rewrite the baseline: the
+        # digests themselves are still the thing under test.
+        resolve = lambda sid: agg_id if sid == "__all__" else sid
         drift = 0
         for sid, secs in want.items():
-            p = store.session_payload(sid)
+            p = store.session_payload(resolve(sid))
             if p is None:
                 failures.append(f"session {sid} in fixture but missing from store")
                 continue
@@ -154,9 +199,9 @@ def main():
                 if got_h != want_h:
                     failures.append(f"{sid}.{sec} digest {got_h} != {want_h}")
                     drift += 1
-        extra = {r["session_id"] for r in rows} - set(want)
+        extra = {r["session_id"] for r in rows} - {resolve(s) for s in want}
         for sid in extra:
-            failures.append(f"session {sid} in store but not in fixture")
+            failures.append(f"{HARNESS} session {sid} in store but not in fixture")
         if not drift and not extra:
             print(f"  {len(want)} sessions match the committed digests")
     else:

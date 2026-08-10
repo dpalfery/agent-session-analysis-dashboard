@@ -1,0 +1,5 @@
+{
+  "$schema": "https://antigravity.google/schema/plugin.schema.json",
+  "name": "agy-otel-telemetry",
+  "description": "Export Antigravity/AGY invocation, tool, token, and transcript telemetry to an OTLP HTTP endpoint."
+}

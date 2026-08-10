@@ -1,0 +1,2 @@
+[console_scripts]
+kyber-observe = kyber_observe.cli:main

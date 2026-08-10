@@ -1,0 +1,37 @@
+{
+  "agy-otel-telemetry": {
+    "PreInvocation": [
+      {
+        "type": "command",
+        "command": "python3 ./telemetry.py --event pre-invocation",
+        "timeout": 5
+      }
+    ],
+    "PostInvocation": [
+      {
+        "type": "command",
+        "command": "python3 ./telemetry.py --event post-invocation",
+        "timeout": 10
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ./telemetry.py --event post-tool-use",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "type": "command",
+        "command": "python3 ./telemetry.py --event stop",
+        "timeout": 10
+      }
+    ]
+  }
+}

@@ -115,7 +115,8 @@ CREATE TABLE IF NOT EXISTS problem (
     severity   TEXT NOT NULL,
     code       TEXT NOT NULL,
     message    TEXT NOT NULL,
-    at         REAL NOT NULL
+    at         REAL NOT NULL,
+    harness    TEXT
 );
 """
 
@@ -126,6 +127,13 @@ class Store:
         self.db = sqlite3.connect(self.path, timeout=30.0)
         self.db.row_factory = sqlite3.Row
         self.db.executescript(SCHEMA)
+        cols = {r["name"] for r in self.db.execute("PRAGMA table_info(problem)")}
+        if "harness" not in cols:
+            self.db.execute("ALTER TABLE problem ADD COLUMN harness TEXT")
+            # Clear stale rows accumulated by the old session_id-scoped delete
+            # (they were never cleaned and grew to thousands across rebuilds).
+            # Fully regenerable on the next pipeline rebuild.
+            self.db.execute("DELETE FROM problem")
         self.set_meta("schema_version", str(SCHEMA_VERSION))
         self.db.commit()
 
@@ -210,6 +218,25 @@ class Store:
         q += " ORDER BY timestamp"
         return [json.loads(r["raw"]) for r in self.db.execute(q, args)]
 
+    def reclassify(self, resolver):
+        """Re-run detection over stored spans and UPDATE harness where it changed.
+
+        add_spans/INSERT OR IGNORE never revisits a stored span, so a fix to an
+        adapter's detect() only routes NEW ingests -- spans already in the store
+        keep their original harness. Call this once per SCHEMA_VERSION to migrate
+        stored spans after a detection change. Returns the number of rows updated.
+        """
+        updated = 0
+        with self.tx() as db:
+            for r in db.execute("SELECT span_id, harness, raw FROM span"):
+                sp = json.loads(r["raw"])
+                new = resolver(sp)
+                if new is not None and new != r["harness"]:
+                    db.execute("UPDATE span SET harness=? WHERE span_id=?",
+                               (new, r["span_id"]))
+                    updated += 1
+        return updated
+
     def harnesses(self):
         return [(r["harness"], r["n"]) for r in self.db.execute(
             "SELECT harness, COUNT(*) n FROM span GROUP BY harness ORDER BY n DESC")]
@@ -242,7 +269,7 @@ class Store:
             if old:
                 qs = ",".join("?" * len(old))
                 db.execute(f"DELETE FROM session_span WHERE session_id IN ({qs})", old)
-                db.execute(f"DELETE FROM problem WHERE session_id IN ({qs})", old)
+            db.execute("DELETE FROM problem WHERE harness=?", (harness,))
             db.execute("DELETE FROM session WHERE harness=?", (harness,))
             for sess, payload in sessions_with_payloads:
                 db.execute(
@@ -260,9 +287,10 @@ class Store:
             now = time.time()
             for p in problems:
                 db.execute(
-                    "INSERT INTO problem(session_id,span_id,severity,code,message,at)"
-                    " VALUES(?,?,?,?,?,?)",
-                    (p.session_id, p.span_id, p.severity, p.code, p.message, now))
+                    "INSERT INTO problem(session_id,span_id,severity,code,message,at,harness)"
+                    " VALUES(?,?,?,?,?,?,?)",
+                    (p.session_id, p.span_id, p.severity, p.code, p.message, now,
+                     harness))
 
     def session_list(self):
         return [dict(r) for r in self.db.execute(

@@ -59,6 +59,17 @@ class Adapter:
         """Canonical spans -> list[Session]."""
         raise NotImplementedError
 
+    # ---- reporting -------------------------------------------------------
+    def notes(self, spans) -> list:
+        """Harness-specific caveats about what these spans do and don't cover.
+
+        A view that renders nothing is ambiguous: "this harness never does that"
+        and "this harness was configured not to export that" look identical, and
+        only the adapter can tell them apart. Return short plain-sentence
+        strings; the UI shows them verbatim. Default: nothing to say.
+        """
+        return []
+
     # ---- validation ------------------------------------------------------
     def validate(self, session, spans) -> list:
         """Return Problems. An "error" severity must block the session.

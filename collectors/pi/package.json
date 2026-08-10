@@ -1,0 +1,31 @@
+{
+  "name": "@dpalfery/pi-statusline",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Pi status bar collector: renders a branded terminal status bar and exports OTLP GenAI trace spans to the Agent Session Analysis Dashboard.",
+  "license": "MIT",
+  "exports": {
+    ".": "./src/extension.ts"
+  },
+  "pi": {
+    "extensions": ["./src/extension.ts"]
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-ai": "0.82.0",
+    "@earendil-works/pi-coding-agent": "0.82.0",
+    "@types/node": "^22.0.0",
+    "typescript": "^5.5.0"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "dev": "pi --no-extensions -e .",
+    "test": "node --test src/__tests__/*.test.ts"
+  }
+}

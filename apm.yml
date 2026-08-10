@@ -1,0 +1,12 @@
+name: agent-session-analysis-dashboard
+version: 1.0.0
+description: APM project for agent-session-analysis-dashboard
+author: dpalfery
+targets:
+- agent-skills
+dependencies:
+  apm:
+  - dpalfery/kyber-weave
+  mcp: []
+includes: auto
+scripts: {}

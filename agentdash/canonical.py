@@ -21,6 +21,18 @@ disagreement is silent:
       Verified: prompt 3528 + cache_read 39744 + completion 17 = total 43289.
       -> fresh = prompt, used as-is
 
+  pi / ObservMe (OTel GenAI attribute NAMES, OpenCode-style SEMANTICS)
+      gen_ai.usage.input_tokens EXCLUDES both cache classes -- the opposite of
+      Copilot, under the identical attribute key. Verified on 303/307 spans:
+      input + cache_read + cache_creation + output == pi.llm.usage.total_tokens,
+      exactly; the other 4 spans have both cache classes at 0, where the two
+      conventions are indistinguishable. Copilot's subtraction applied here
+      would yield NEGATIVE fresh input on 293 of 307 spans.
+      -> fresh = input_tokens, used as-is
+
+That last case is why detection is by fingerprint and conversion lives in the
+adapter: two harnesses emit the SAME attribute key with OPPOSITE meanings.
+
 Mapping one of those conventions onto the other produces numbers that look
 plausible and are wrong -- negative fresh input, or input double-counted by up
 to 2x. So TokenUsage stores the classes DISJOINTLY: fresh_input, cache_read and
@@ -35,7 +47,30 @@ from typing import Any, Optional
 
 # Bump when an adapter's output shape or semantics change, so derived rows can
 # be selectively recomputed instead of wiping the whole store.
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 3
+
+
+# The canonical keys of CanonicalSpan.content. This is a CONTRACT, not a hint:
+# views.py and the UI address content by these names only, so a harness that
+# reports the same thing under a different attribute is normalized here and
+# nowhere else. A key a harness does not report is simply absent -- never
+# synthesized, and rendered as "not recorded".
+CONTENT_KEYS = {
+    # Structured, when the harness emits per-message parts.
+    "system_instructions": "system prompt text",
+    "input_messages":      "[{role, parts:[{type, ...}]}] -- bucket on part TYPE",
+    "output_messages":     "same shape, the model's reply",
+    "tool_definitions":    "the tool schema block sent with the request",
+    # Flattened, when the harness emits one pre-joined string instead. pi does
+    # this: the whole prompt arrives as a single redacted blob, so it can be
+    # tokenized and split on instruction blocks but NOT attributed per message.
+    "prompt_text":         "entire request prompt, flattened to one string",
+    "response_text":       "model reply, flattened",
+    "reasoning_text":      "reasoning/thinking trace, flattened",
+    # Tool spans.
+    "tool_call_arguments": "arguments the model passed",
+    "tool_call_result":    "what the tool returned",
+}
 
 
 @dataclass
@@ -108,6 +143,13 @@ class CanonicalSpan:
     ttft_ms: Optional[int] = None
     finish_reasons: Optional[list] = None
     error_type: Optional[str] = None
+
+    # Cost the HARNESS computed for itself, verbatim, in USD. Some harnesses
+    # price their own calls (pi knows its provider's rates and reports
+    # pi.llm.cost.*_usd); others bill in a currency we can only price from a
+    # published table (Copilot credits). Kept separate from rates-derived cost
+    # so the two are never silently blended -- see cost.py.
+    reported_cost_usd: Optional[float] = None
 
     # Content-bearing attributes, harness-normalized keys. Tokenized lazily and
     # cached by (span_id, key) -- see tokens.py.

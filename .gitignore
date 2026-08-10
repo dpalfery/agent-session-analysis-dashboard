@@ -46,3 +46,7 @@ venv/
 # these are the identifiers the check keeps out of the repo, so they must not
 # themselves be committed.
 tests/markers.local.txt
+
+
+# APM dependencies
+apm_modules/

@@ -17,9 +17,11 @@ numbers that look right -- the failure mode this whole design guards against.
 """
 
 from .copilot import CopilotAdapter
+from .pi import PiAdapter
+from .gemini import GeminiAdapter
 
 # Registration order is irrelevant; the highest score wins.
-ADAPTERS = [CopilotAdapter()]
+ADAPTERS = [CopilotAdapter(), PiAdapter(), GeminiAdapter()]
 
 # Below this, we would be guessing. Quarantine instead.
 MIN_CONFIDENCE = 0.5

@@ -107,10 +107,25 @@ class CopilotAdapter(Adapter):
     name = "copilot"
     version = 1
 
+    # Attributes the footer reports coverage for. Copilot-specific by design --
+    # see pipeline.WATCHED_ATTRS.
+    watched_attributes = [
+        "gen_ai.usage.cache_creation.input_tokens",
+        "github.copilot.tool.parameters.skill_name",
+        "error.type",
+    ]
+
     # ---- detection -------------------------------------------------------
     def detect(self, span: dict) -> float:
         """Fingerprint on attribute namespaces, never on `source`."""
         attrs = span.get("attributes") or {}
+        # An explicit self-declaration of the AI system is a stronger signal than
+        # mimicked attribute namespaces. The AGY collector stamps copilot_chat.*
+        # onto its spans too, so without this defer a gen_ai.system="gemini" span
+        # ties with Copilot at 1.0 and loses (Copilot is first in the registry).
+        system = attrs.get("gen_ai.system")
+        if system and system != "copilot":
+            return 0.0
         if not attrs:
             return 0.0
         has_genai = any(a.startswith("gen_ai.") for a in attrs)
