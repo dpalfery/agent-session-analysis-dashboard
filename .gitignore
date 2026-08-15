@@ -50,3 +50,6 @@ tests/markers.local.txt
 
 # APM dependencies
 apm_modules/
+
+# Node dependencies
+node_modules/

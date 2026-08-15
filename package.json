@@ -1,0 +1,5 @@
+{
+  "dependencies": {
+    "@azure/mcp-darwin-arm64": "^3.0.0-beta.34"
+  }
+}
